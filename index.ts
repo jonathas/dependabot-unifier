@@ -24,10 +24,20 @@ class DependabotUnifier {
   private async init() {
     try {
       await this.checkDependencies(['gh', 'git', 'npm']);
+
       const repo = await this.getGitRepo();
+
       const dependabotPRs = await this.getDependabotPRs(repo);
+
       const libsAndVersions = this.getLibsAndNewVersions(dependabotPRs);
+      if (!libsAndVersions.length) {
+        throw new Error(
+          'No PR matches any lib found in package.json. You will need to merge the PRs manually!'
+        );
+      }
+
       await this.npmUpdate(libsAndVersions);
+
       console.log('\nDone! Now you can start the project and run the tests!');
       console.log('\nIf everything is ok, commit the changes and open a pull request!');
     } catch (err) {
@@ -47,6 +57,7 @@ class DependabotUnifier {
 
   private async getGitRepo() {
     await execAsync(`cd ${this.path} && git rev-parse --is-inside-work-tree`);
+  
     const repo = await execAsync(`cd ${this.path} && git remote -v`);
     if (!repo.stdout.trim()) {
       throw new Error('Remote repository not found');
@@ -66,23 +77,35 @@ class DependabotUnifier {
     if (!dependabotPRs.stdout.trim()) {
       throw new Error('No dependabot PRs found!');
     }
-    const prs = dependabotPRs.stdout.split('\n').filter(pr => pr !== '')
+
+    const prs = dependabotPRs.stdout.split('\n').filter(pr => pr !== '');
     console.log(`Found ${prs.length} dependabot PRs!`);
     console.log('Updating libs ...\n');
+
     return prs;
   }
 
   private getLibsAndNewVersions(prList: string[]): LibAndVersion[] {
-    return prList.map(title => {
+    const libsAndVersions = prList.map(title => {
       const libAndVersion = title.match(/bump\s(.)+\sfrom\s[0-9.]+\sto\s[0-9.]+/gm);
+      if (!libAndVersion) {
+        throw new Error('No libs found in PR title! Your PR title must follow the conventional commit format');
+      }
       const lib = libAndVersion[0].split(' ')[1];
       const currentVersion = libAndVersion[0].split(' ')[3];
       const newVersion = libAndVersion[0].split(' ')[5];
       return { lib, currentVersion, newVersion };
     });
+
+    return libsAndVersions.filter(({ lib }) => this.isLibInPackageJson(lib));
   }
 
-  private async npmUpdate(libsAndVersions: LibAndVersion[]) {
+  private isLibInPackageJson(lib: string): boolean {
+    const packageJson = require(`${this.path}/package.json`);
+    return packageJson.dependencies[lib] || packageJson.devDependencies[lib];
+  }
+
+  private async 'npmUpdate'(libsAndVersions: LibAndVersion[]) {
     for (const libAndVersion of libsAndVersions) {
       try {
         const { lib, currentVersion, newVersion } = libAndVersion;
